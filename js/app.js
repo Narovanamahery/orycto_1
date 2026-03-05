@@ -1,4 +1,4 @@
-import { createHeader }            from './components/header.js';
+import { createHeader }              from './components/header.js';
 import { createSidebar, updateBadges } from './components/sidebar.js';
 import { dashboardHTML,    initDashboard }    from './pages/dashboard.js';
 import { livestockHTML,    initLivestock }    from './pages/livestock.js';
@@ -6,22 +6,10 @@ import { healthHTML,       initHealth }       from './pages/health.js';
 import { reproductionHTML, initReproduction } from './pages/reproduction.js';
 import { feedingHTML,      initFeeding }      from './pages/feeding.js';
 import { statisticsHTML,   initStatistics }   from './pages/statistics.js';
+import { getSession, clearSession, showAuthPage } from './auth.js';
 
-const App = document.querySelector('.app');
-App.appendChild(createHeader());
-
-const container = document.createElement('div');
-container.classList.add('container');
-
-const contentArea = document.createElement('div');
-contentArea.classList.add('content');
-container.appendChild(createSidebar());
-container.appendChild(contentArea);
-App.appendChild(container);
-
-const toastContainer = document.createElement('div');
-toastContainer.classList.add('toast-container');
-document.body.appendChild(toastContainer);
+let toastContainer;
+let contentArea;
 
 export function showToast(msg, type = 'success') {
   const icons = { success: '✅', error: '❌', warn: '⚠️', info: 'ℹ️' };
@@ -61,7 +49,51 @@ async function navigate(hash) {
   updateBadges();
 }
 
-window.addEventListener('hashchange', () => navigate(location.hash));
-navigate(location.hash || '#dashboard');
+async function handleLogout() {
+  await clearSession();
+  location.hash = '';
+  startAuth();
+}
+
+async function buildApp(user) {
+  document.body.innerHTML = '';
+
+  const App = document.createElement('div');
+  App.className = 'app';
+  document.body.appendChild(App);
+
+  App.appendChild(createHeader(user, handleLogout));
+
+  const container = document.createElement('div');
+  container.classList.add('container');
+
+  contentArea = document.createElement('div');
+  contentArea.classList.add('content');
+  container.appendChild(createSidebar());
+  container.appendChild(contentArea);
+  App.appendChild(container);
+
+  toastContainer = document.createElement('div');
+  toastContainer.classList.add('toast-container');
+  document.body.appendChild(toastContainer);
+
+  window.addEventListener('hashchange', () => navigate(location.hash));
+  await navigate(location.hash || '#dashboard');
+}
+
+function startAuth() {
+  showAuthPage(async (user) => {
+    await buildApp(user);
+  });
+}
+
+(async () => {
+  const session = await getSession();
+  if (session) {
+    await buildApp(session);
+  } else {
+    startAuth();
+  }
+})();
 
 export { contentArea };

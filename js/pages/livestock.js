@@ -147,13 +147,17 @@ export function livestockHTML() {
           </div>
           <div class="form-group">
             <label>Breed</label>
-            <select id="f-breed">
+            <input id="f-breed" list="breed-suggestions" placeholder="e.g. Rex, Crossbreed…" autocomplete="off">
+            <datalist id="breed-suggestions">
               <option>Flemish Giant</option>
               <option>Rex</option>
               <option>Californian</option>
               <option>Dutch</option>
               <option>New Zealand</option>
-            </select>
+              <option>Angora</option>
+              <option>Lionhead</option>
+              <option>Crossbreed</option>
+            </datalist>
           </div>
         </div>
         <div class="form-row">
