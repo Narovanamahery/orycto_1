@@ -1,205 +1,221 @@
-# Orycto Backend
+# Orycto Backend v2 — Professionnel
 
-REST API — Node.js · Express · PostgreSQL  
-Auth : JWT + Sessions (connect-pg-simple)
-
----
-
-## Prérequis
-
-- Node.js 18+
-- PostgreSQL 14+
+REST API complète · Node.js · Express · PostgreSQL  
+Auth : JWT + Sessions · Super Admin · Workflow d'approbation · Audit complet
 
 ---
 
-## Installation
+## Installation rapide
 
 ```bash
-cd orycto-backend
+cd orycto-backend-v2
 npm install
 
 cp .env.example .env
-# Editer .env avec tes valeurs
-```
+# → Remplir DB_*, JWT_SECRET, SESSION_SECRET, CLIENT_ORIGIN
 
-### Créer la base de données
-
-```sql
--- Dans psql :
+# Créer la base (psql)
 CREATE DATABASE orycto_db;
-```
 
-### Lancer les migrations
-
-```bash
+# Migrations (toutes les tables)
 npm run migrate
+
+# Démarrer
+npm run dev
 ```
 
-### Démarrer le serveur
+---
+
+## Initialisation — Premier démarrage
+
+**Étape 1 : Créer le Super Admin** (route one-shot, bloquée si un SA existe déjà)
 
 ```bash
-# Développement (auto-reload)
-npm run dev
-
-# Production
-npm start
+curl -X POST http://localhost:3001/api/auth/init-super-admin \
+  -H "Content-Type: application/json" \
+  -d '{
+    "email":     "narovanam@orycto.mg",
+    "password":  "SuperSecurePassword123!",
+    "firstName": "Super",
+    "lastName":  "Admin"
+  }'
 ```
 
-Le serveur démarre sur **http://localhost:3001**
+**Étape 2 : Créer une exploitation via le panel admin**
+
+```bash
+curl -X POST http://localhost:3001/api/admin/exploitations \
+  -H "Authorization: Bearer <TOKEN>" \
+  -H "Content-Type: application/json" \
+  -d '{"nom": "Ferme Exemple", "ville": "Antananarivo", "plan": "pro"}'
+```
+
+**Étape 3 : Les utilisateurs s'inscrivent → le SA les approuve**
+
+---
+
+## Architecture des rôles
+
+```
+super_admin
+  │  Gère la plateforme entière
+  │  Approuve/refuse les comptes
+  │  Crée/gère les exploitations
+  │  Voit les logs d'audit globaux
+  │
+  └─ exploitation (farm)
+       │
+       ├─ admin          → Gère les users de l'exploitation
+       ├─ eleveur        → Accès complet aux données
+       ├─ veterinaire    → Accès complet santé + lecture autre
+       ├─ ouvrier        → Saisie quotidienne (dist., pesées)
+       └─ viewer         → Lecture seule
+```
+
+---
+
+## Workflow d'inscription
+
+```
+[User] Inscription
+    ↓
+status = 'pending'
+    ↓
+Notification → Super Admin
+    ↓
+[SA] /api/admin/users/:id/approve  → status = 'active' + assigne exploitation + rôle
+  ou /api/admin/users/:id/reject   → status = 'rejected' + motif
+    ↓
+[User] Notification + peut se connecter (si approuvé)
+```
+
+**Alternative : invitation directe**
+```
+[SA/Admin] POST /api/admin/invitations {email, exploitation_id, role}
+    ↓  token d'invitation généré
+[User] Inscription avec invitationToken → status = 'active' directement
+```
+
+---
+
+## Schéma de base de données — Toutes les tables
+
+| Table | Description |
+|---|---|
+| `exploitations` | Fermes/élevages (multi-tenant) |
+| `users` | Utilisateurs avec rôles, statuts, consentements |
+| `session` | Sessions PostgreSQL |
+| `invitations` | Invitations par token |
+| `audit_logs` | Journal complet de toutes les actions |
+| `notifications` | Notifications in-app |
+| `legal_consents` | Historique des acceptations CGU/Privacy |
+| `races` | Races de lapins (par exploitation) |
+| `cages` | Cages (par exploitation) |
+| `lapins` | Cheptel complet avec race libre |
+| `traitements` | Référentiel de traitements |
+| `suivis` | Applications de traitements |
+| `pathologies` | Maladies et pathologies |
+| `accouplements` | Accouplements |
+| `portees` | Portées |
+| `lapins_portees` | Lapins individuels d'une portée |
+| `aliments` | Aliments disponibles |
+| `stocks` | Stocks d'aliments |
+| `rations` | Protocoles alimentaires par type |
+| `distributions` | Distributions quotidiennes |
+| `evenements` | Événements (vente, achat, mort…) |
+| `couts` | Dépenses |
+| `perf` | KPIs reproducteurs |
+
+---
+
+## Routes API complètes
+
+### Auth (public)
+```
+POST /api/auth/register          ← inscription (→ pending)
+POST /api/auth/register          ← avec invitationToken (→ active)
+POST /api/auth/login
+POST /api/auth/logout
+GET  /api/auth/me
+POST /api/auth/init-super-admin  ← one-shot premier démarrage
+```
+
+### Legal (public)
+```
+GET  /api/legal/terms
+GET  /api/legal/privacy
+GET  /api/legal/versions
+POST /api/legal/consent          ← (auth) enregistrer un consentement
+GET  /api/legal/my-consents      ← (auth) historique mes consentements
+```
+
+### Admin (super_admin requis)
+```
+GET    /api/admin/stats
+GET    /api/admin/users
+GET    /api/admin/users/pending
+GET    /api/admin/users/:id
+PUT    /api/admin/users/:id
+POST   /api/admin/users/:id/approve
+POST   /api/admin/users/:id/reject
+POST   /api/admin/users/:id/suspend
+POST   /api/admin/users/:id/reactivate
+DELETE /api/admin/users/:id
+POST   /api/admin/users/:id/reset-password
+
+GET    /api/admin/exploitations
+POST   /api/admin/exploitations
+PUT    /api/admin/exploitations/:id
+
+GET    /api/admin/invitations
+POST   /api/admin/invitations
+DELETE /api/admin/invitations/:id
+
+GET    /api/admin/audit
+```
+
+### Données exploitation (auth + exploitation requis)
+```
+/api/lapins         CRUD complet
+/api/sante          Soins + pathologies
+/api/reproduction   Accouplements + portées + naissances
+/api/alimentation   Aliments + stocks + distributions + restock
+/api/dashboard      KPIs + alertes + statistiques
+/api/evenements     Événements
+/api/couts          Dépenses
+```
+
+---
+
+## Sécurité
+
+- Mots de passe : **bcrypt** (coût 12)
+- Tokens : **JWT RS256** ou HS256, expiration 7j
+- Sessions : **PostgreSQL**, cookie HttpOnly + SameSite
+- Verrouillage : **5 tentatives** → lock 15 min
+- Isolation : toutes les données scoped par `exploitation_id`
+- Audit : **toutes les actions** tracées avec IP + user agent
+- Consentement : **horodaté, versionné, IP loguée**
 
 ---
 
 ## Variables d'environnement
 
-| Variable | Défaut | Description |
-|---|---|---|
-| `DB_HOST` | localhost | Host PostgreSQL |
-| `DB_PORT` | 5432 | Port PostgreSQL |
-| `DB_NAME` | orycto_db | Nom de la base |
-| `DB_USER` | postgres | Utilisateur |
-| `DB_PASSWORD` | — | Mot de passe |
-| `PORT` | 3001 | Port du serveur |
-| `JWT_SECRET` | — | Secret JWT (min 32 chars) |
-| `JWT_EXPIRES_IN` | 7d | Durée du token |
-| `SESSION_SECRET` | — | Secret session |
-| `CLIENT_ORIGIN` | http://localhost:5173 | Origine CORS |
+```env
+DB_HOST=localhost
+DB_PORT=5432
+DB_NAME=orycto_db
+DB_USER=postgres
+DB_PASSWORD=your_password
 
----
+PORT=3001
+NODE_ENV=development
 
-## Routes API
+JWT_SECRET=min_32_chars_random_string_here
+JWT_EXPIRES_IN=7d
 
-### Auth
-| Method | Route | Description |
-|---|---|---|
-| POST | `/api/auth/register` | Créer un compte |
-| POST | `/api/auth/login` | Se connecter |
-| POST | `/api/auth/logout` | Se déconnecter |
-| GET  | `/api/auth/me` | Profil courant |
+SESSION_SECRET=another_long_random_string
+SESSION_MAX_AGE=604800000
 
-### Lapins
-| Method | Route | Description |
-|---|---|---|
-| GET    | `/api/lapins` | Liste (filtres: search, statut, sexe) |
-| GET    | `/api/lapins/:id` | Détail |
-| POST   | `/api/lapins` | Créer |
-| PUT    | `/api/lapins/:id` | Modifier |
-| DELETE | `/api/lapins/:id` | Supprimer |
-
-### Santé
-| Method | Route | Description |
-|---|---|---|
-| GET    | `/api/sante` | Soins (filtre: statut) |
-| POST   | `/api/sante` | Créer soin |
-| PUT    | `/api/sante/:id` | Modifier soin |
-| DELETE | `/api/sante/:id` | Supprimer soin |
-| GET    | `/api/sante/pathologies` | Liste pathologies |
-| POST   | `/api/sante/pathologies` | Créer pathologie |
-| DELETE | `/api/sante/pathologies/:id` | Supprimer pathologie |
-
-### Reproduction
-| Method | Route | Description |
-|---|---|---|
-| GET    | `/api/reproduction` | Accouplements |
-| POST   | `/api/reproduction` | Créer |
-| PUT    | `/api/reproduction/:id` | Modifier |
-| DELETE | `/api/reproduction/:id` | Supprimer |
-| POST   | `/api/reproduction/:id/naissance` | Enregistrer naissance |
-| GET    | `/api/reproduction/portees` | Portées |
-| POST   | `/api/reproduction/portees` | Créer portée |
-| DELETE | `/api/reproduction/portees/:id` | Supprimer portée |
-
-### Alimentation
-| Method | Route | Description |
-|---|---|---|
-| GET    | `/api/alimentation/aliments` | Aliments |
-| POST   | `/api/alimentation/aliments` | Créer aliment |
-| DELETE | `/api/alimentation/aliments/:id` | Supprimer |
-| GET    | `/api/alimentation/stocks` | Stocks |
-| POST   | `/api/alimentation/stocks` | Créer/incrémenter stock |
-| PUT    | `/api/alimentation/stocks/:id` | Modifier stock |
-| POST   | `/api/alimentation/stocks/restock` | Réapprovisionner |
-| DELETE | `/api/alimentation/stocks/:id` | Supprimer |
-| GET    | `/api/alimentation/distributions` | Distributions |
-| POST   | `/api/alimentation/distributions` | Enregistrer distribution |
-| DELETE | `/api/alimentation/distributions/:id` | Supprimer |
-
-### Dashboard
-| Method | Route | Description |
-|---|---|---|
-| GET | `/api/dashboard` | KPIs + alertes + activités + stocks |
-| GET | `/api/dashboard/statistiques` | Races + mensuel + coûts |
-
-### Événements & Coûts
-| Method | Route | Description |
-|---|---|---|
-| GET/POST/PUT/DELETE | `/api/evenements` | Événements |
-| GET/POST/DELETE | `/api/couts` | Coûts |
-
----
-
-## Authentification
-
-Deux mécanismes sont supportés simultanément :
-
-**Session cookie** (navigateur)  
-Automatique après login. Durée : 7 jours.
-
-**JWT Bearer** (API / mobile)  
-```
-Authorization: Bearer <token>
-```
-Le token est retourné dans la réponse du login.
-
----
-
-## Structure des fichiers
-
-```
-orycto-backend/
-├── src/
-│   ├── index.js              ← Entry point Express
-│   ├── db/
-│   │   ├── pool.js           ← Connexion PostgreSQL
-│   │   └── migrate.js        ← Création des tables
-│   ├── middleware/
-│   │   └── auth.js           ← requireAuth (JWT + session)
-│   └── routes/
-│       ├── auth.js           ← /api/auth
-│       ├── lapins.js         ← /api/lapins
-│       ├── sante.js          ← /api/sante
-│       ├── reproduction.js   ← /api/reproduction
-│       ├── alimentation.js   ← /api/alimentation
-│       ├── dashboard.js      ← /api/dashboard
-│       └── misc.js           ← /api/evenements + /api/couts
-├── .env.example
-├── package.json
-└── README.md
-```
-
----
-
-## Connexion avec le frontend
-
-Dans `js/api.js`, remplacer le storage layer par les appels REST :
-
-```js
-const BASE_URL = 'http://localhost:3001/api';
-
-async function request(method, endpoint, body = null) {
-  const token = localStorage.getItem('orycto_token');
-  const res = await fetch(`${BASE_URL}${endpoint}`, {
-    method,
-    credentials: 'include',          // session cookie
-    headers: {
-      'Content-Type':  'application/json',
-      ...(token ? { 'Authorization': `Bearer ${token}` } : {}),
-    },
-    body: body ? JSON.stringify(body) : undefined,
-  });
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({ error: res.statusText }));
-    throw new Error(err.error || `Error ${res.status}`);
-  }
-  return res.json();
-}
+CLIENT_ORIGIN=http://localhost:5173
 ```

@@ -1,228 +1,227 @@
 import { Router } from 'express';
-import { requireAuth } from '../middleware/auth.js';
+import { requireAuth, requireExploitation } from '../middleware/auth.js';
 import { query } from '../db/pool.js';
 
 const router = Router();
 router.use(requireAuth);
+router.use(requireExploitation);
+
+const eid = req => req.user.exploitation_id;
 
 // ── Aliments ──────────────────────────────────────────────────────────────────
 
-// GET /api/alimentation/aliments
 router.get('/aliments', async (req, res) => {
   try {
-    const result = await query(
-      'SELECT * FROM aliments WHERE user_id = $1 ORDER BY nom',
-      [req.user.id]
-    );
-    res.json(result.rows);
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
+    const r = await query('SELECT * FROM aliments WHERE exploitation_id = $1 ORDER BY nom', [eid(req)]);
+    res.json(r.rows);
+  } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-// POST /api/alimentation/aliments
 router.post('/aliments', async (req, res) => {
   try {
-    const { nom, unite_mesure, description } = req.body;
-    if (!nom) return res.status(400).json({ error: 'nom is required' });
-
-    const result = await query(
-      `INSERT INTO aliments (nom, unite_mesure, description, user_id)
-       VALUES ($1,$2,$3,$4) RETURNING *`,
-      [nom, unite_mesure || 'kg', description || null, req.user.id]
+    const { nom, type, unite_mesure, description } = req.body;
+    if (!nom) return res.status(400).json({ error: 'nom est requis' });
+    const r = await query(
+      'INSERT INTO aliments (exploitation_id,nom,type,unite_mesure,description) VALUES ($1,$2,$3,$4,$5) RETURNING *',
+      [eid(req), nom, type||'autre', unite_mesure||'kg', description||null]
     );
-    res.status(201).json(result.rows[0]);
+    res.status(201).json(r.rows[0]);
   } catch (err) {
+    if (err.code === '23505') return res.status(409).json({ error: 'Aliment déjà existant' });
     res.status(500).json({ error: err.message });
   }
 });
 
-// DELETE /api/alimentation/aliments/:id
+router.put('/aliments/:id', async (req, res) => {
+  try {
+    const { nom, type, unite_mesure, description } = req.body;
+    const r = await query(
+      `UPDATE aliments SET nom=COALESCE($1,nom),type=COALESCE($2,type),
+       unite_mesure=COALESCE($3,unite_mesure),description=COALESCE($4,description)
+       WHERE id=$5 AND exploitation_id=$6 RETURNING *`,
+      [nom||null,type||null,unite_mesure||null,description||null,req.params.id,eid(req)]
+    );
+    if (!r.rows.length) return res.status(404).json({ error: 'Aliment introuvable' });
+    res.json(r.rows[0]);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
 router.delete('/aliments/:id', async (req, res) => {
   try {
-    const result = await query(
-      'DELETE FROM aliments WHERE id = $1 AND user_id = $2 RETURNING id',
-      [req.params.id, req.user.id]
-    );
-    if (!result.rows.length) return res.status(404).json({ error: 'Feed not found' });
+    const r = await query('DELETE FROM aliments WHERE id=$1 AND exploitation_id=$2 RETURNING id', [req.params.id,eid(req)]);
+    if (!r.rows.length) return res.status(404).json({ error: 'Aliment introuvable' });
     res.json({ deleted: req.params.id });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
+  } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
 // ── Stocks ────────────────────────────────────────────────────────────────────
 
-// GET /api/alimentation/stocks
 router.get('/stocks', async (req, res) => {
   try {
-    const result = await query(
-      `SELECT s.*, a.nom, a.unite_mesure
-       FROM stocks s
-       JOIN aliments a ON a.id = s.aliment_id
-       WHERE s.user_id = $1
-       ORDER BY a.nom`,
-      [req.user.id]
+    const r = await query(
+      `SELECT s.*,a.nom,a.unite_mesure,a.type FROM stocks s
+       JOIN aliments a ON a.id=s.aliment_id
+       WHERE s.exploitation_id=$1 ORDER BY a.nom`,
+      [eid(req)]
     );
-    res.json(result.rows);
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
+    res.json(r.rows);
+  } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-// POST /api/alimentation/stocks
 router.post('/stocks', async (req, res) => {
   try {
-    const { aliment_id, quantite, seuil_alerte, date_expiration } = req.body;
-    if (!aliment_id) return res.status(400).json({ error: 'aliment_id is required' });
-
-    const result = await query(
-      `INSERT INTO stocks (aliment_id, quantite, seuil_alerte, date_expiration, user_id)
-       VALUES ($1,$2,$3,$4,$5)
-       ON CONFLICT (aliment_id, user_id)
-       DO UPDATE SET
-         quantite        = stocks.quantite + EXCLUDED.quantite,
-         seuil_alerte    = COALESCE(EXCLUDED.seuil_alerte, stocks.seuil_alerte),
-         date_expiration = COALESCE(EXCLUDED.date_expiration, stocks.date_expiration),
-         updated_at      = NOW()
+    const { aliment_id, quantite, seuil_alerte, fournisseur, prix_kg, date_achat, date_peremption } = req.body;
+    if (!aliment_id) return res.status(400).json({ error: 'aliment_id est requis' });
+    const r = await query(
+      `INSERT INTO stocks (exploitation_id,aliment_id,quantite,seuil_alerte,fournisseur,prix_kg,date_achat,date_peremption)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+       ON CONFLICT (exploitation_id,aliment_id) DO UPDATE SET
+         quantite=stocks.quantite+EXCLUDED.quantite,
+         seuil_alerte=COALESCE(EXCLUDED.seuil_alerte,stocks.seuil_alerte),
+         fournisseur=COALESCE(EXCLUDED.fournisseur,stocks.fournisseur),
+         prix_kg=COALESCE(EXCLUDED.prix_kg,stocks.prix_kg),
+         date_peremption=COALESCE(EXCLUDED.date_peremption,stocks.date_peremption),
+         updated_at=NOW()
        RETURNING *`,
-      [aliment_id, quantite || 0, seuil_alerte || 0, date_expiration || null, req.user.id]
+      [eid(req),aliment_id,quantite||0,seuil_alerte||0,fournisseur||null,prix_kg||null,date_achat||null,date_peremption||null]
     );
-    res.status(201).json(result.rows[0]);
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
+    res.status(201).json(r.rows[0]);
+  } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-// PUT /api/alimentation/stocks/:id
-router.put('/stocks/:id', async (req, res) => {
-  try {
-    const { quantite, seuil_alerte, date_expiration } = req.body;
-    const result = await query(
-      `UPDATE stocks SET
-         quantite        = COALESCE($1, quantite),
-         seuil_alerte    = COALESCE($2, seuil_alerte),
-         date_expiration = COALESCE($3, date_expiration),
-         updated_at      = NOW()
-       WHERE id = $4 AND user_id = $5
-       RETURNING *`,
-      [quantite ?? null, seuil_alerte ?? null, date_expiration || null,
-       req.params.id, req.user.id]
-    );
-    if (!result.rows.length) return res.status(404).json({ error: 'Stock not found' });
-    res.json(result.rows[0]);
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// POST /api/alimentation/stocks/restock  (legacy endpoint)
+// Réapprovisionner (compat. frontend legacy)
 router.post('/stocks/restock', async (req, res) => {
   try {
-    const { aliment_id, quantite, date_expiration } = req.body;
-    if (!aliment_id || !quantite) {
-      return res.status(400).json({ error: 'aliment_id and quantite are required' });
-    }
-
-    const result = await query(
-      `INSERT INTO stocks (aliment_id, quantite, seuil_alerte, date_expiration, user_id)
-       VALUES ($1,$2,0,$3,$4)
-       ON CONFLICT (aliment_id, user_id)
-       DO UPDATE SET
-         quantite        = stocks.quantite + $2,
-         date_expiration = COALESCE($3, stocks.date_expiration),
-         updated_at      = NOW()
+    const { aliment_id, quantite, date_peremption } = req.body;
+    if (!aliment_id || !quantite) return res.status(400).json({ error: 'aliment_id et quantite requis' });
+    const r = await query(
+      `INSERT INTO stocks (exploitation_id,aliment_id,quantite,seuil_alerte,date_peremption)
+       VALUES ($1,$2,$3,0,$4)
+       ON CONFLICT (exploitation_id,aliment_id) DO UPDATE SET
+         quantite=stocks.quantite+$3,
+         date_peremption=COALESCE($4,stocks.date_peremption),
+         updated_at=NOW()
        RETURNING *`,
-      [aliment_id, quantite, date_expiration || null, req.user.id]
+      [eid(req),aliment_id,quantite,date_peremption||null]
     );
-    res.json(result.rows[0]);
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
+    res.json(r.rows[0]);
+  } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-// DELETE /api/alimentation/stocks/:id
+router.put('/stocks/:id', async (req, res) => {
+  try {
+    const { quantite, seuil_alerte, fournisseur, prix_kg, date_peremption } = req.body;
+    const r = await query(
+      `UPDATE stocks SET quantite=COALESCE($1,quantite),seuil_alerte=COALESCE($2,seuil_alerte),
+       fournisseur=COALESCE($3,fournisseur),prix_kg=COALESCE($4,prix_kg),
+       date_peremption=COALESCE($5,date_peremption),updated_at=NOW()
+       WHERE id=$6 AND exploitation_id=$7 RETURNING *`,
+      [quantite??null,seuil_alerte??null,fournisseur||null,prix_kg||null,date_peremption||null,req.params.id,eid(req)]
+    );
+    if (!r.rows.length) return res.status(404).json({ error: 'Stock introuvable' });
+    res.json(r.rows[0]);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
 router.delete('/stocks/:id', async (req, res) => {
   try {
-    const result = await query(
-      'DELETE FROM stocks WHERE id = $1 AND user_id = $2 RETURNING id',
-      [req.params.id, req.user.id]
-    );
-    if (!result.rows.length) return res.status(404).json({ error: 'Stock not found' });
+    const r = await query('DELETE FROM stocks WHERE id=$1 AND exploitation_id=$2 RETURNING id', [req.params.id,eid(req)]);
+    if (!r.rows.length) return res.status(404).json({ error: 'Stock introuvable' });
     res.json({ deleted: req.params.id });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// ── Rations ───────────────────────────────────────────────────────────────────
+
+router.get('/rations', async (req, res) => {
+  try {
+    const r = await query(
+      `SELECT r.*,a.nom AS nom_aliment,a.unite_mesure FROM rations r
+       JOIN aliments a ON a.id=r.aliment_id
+       WHERE r.exploitation_id=$1 ORDER BY r.type_lapin,a.nom`,
+      [eid(req)]
+    );
+    res.json(r.rows);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+router.post('/rations', async (req, res) => {
+  try {
+    const { aliment_id, type_lapin, quantite_jour, composition } = req.body;
+    if (!aliment_id||!type_lapin||!quantite_jour)
+      return res.status(400).json({ error: 'aliment_id, type_lapin et quantite_jour requis' });
+    const r = await query(
+      'INSERT INTO rations (exploitation_id,aliment_id,type_lapin,quantite_jour,composition) VALUES ($1,$2,$3,$4,$5) RETURNING *',
+      [eid(req),aliment_id,type_lapin,quantite_jour,composition||null]
+    );
+    res.status(201).json(r.rows[0]);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+router.delete('/rations/:id', async (req, res) => {
+  try {
+    await query('DELETE FROM rations WHERE id=$1 AND exploitation_id=$2', [req.params.id,eid(req)]);
+    res.json({ deleted: req.params.id });
+  } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
 // ── Distributions ─────────────────────────────────────────────────────────────
 
-// GET /api/alimentation/distributions
 router.get('/distributions', async (req, res) => {
   try {
-    const result = await query(
-      `SELECT d.*, a.nom AS nom_aliment_ref, a.unite_mesure
+    const r = await query(
+      `SELECT d.*,a.nom AS nom_aliment_ref,a.unite_mesure,
+              l.identifiant_unique AS tag_lapin_ref,c.code AS cage_code
        FROM distributions d
-       LEFT JOIN aliments a ON a.id = d.aliment_id
-       WHERE d.user_id = $1
-       ORDER BY d.date_dist DESC, d.created_at DESC`,
-      [req.user.id]
+       LEFT JOIN aliments a ON a.id=d.aliment_id
+       LEFT JOIN lapins   l ON l.id=d.lapin_id
+       LEFT JOIN cages    c ON c.id=d.cage_id
+       WHERE d.exploitation_id=$1
+       ORDER BY d.date_distribution DESC,d.created_at DESC`,
+      [eid(req)]
     );
-    res.json(result.rows);
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
+    res.json(r.rows);
+  } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-// POST /api/alimentation/distributions
 router.post('/distributions', async (req, res) => {
   try {
-    const {
-      aliment_id, nom_aliment, lapin_id,
-      tag_lapin, quantite, date_dist, notes,
-    } = req.body;
+    const { aliment_id, lapin_id, cage_id, ration_id,
+            quantite_distribuee, quantite, reste,
+            date_distribution, notes } = req.body;
+    const qte = quantite_distribuee || quantite;
+    if (!aliment_id || !qte) return res.status(400).json({ error: 'aliment_id et quantite_distribuee requis' });
 
-    if (!aliment_id || !quantite) {
-      return res.status(400).json({ error: 'aliment_id and quantite are required' });
-    }
-
-    const result = await query(
+    const r = await query(
       `INSERT INTO distributions
-         (aliment_id, nom_aliment, lapin_id, tag_lapin, quantite, date_dist, notes, user_id)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING *`,
-      [aliment_id, nom_aliment || null, lapin_id || null,
-       tag_lapin || null, quantite,
-       date_dist || new Date().toISOString().slice(0, 10),
-       notes || null, req.user.id]
+         (exploitation_id,aliment_id,lapin_id,cage_id,ration_id,
+          date_distribution,quantite_distribuee,reste,notes,created_by)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING *`,
+      [eid(req),aliment_id,lapin_id||null,cage_id||null,ration_id||null,
+       date_distribution||new Date().toISOString().slice(0,10),
+       qte,reste||null,notes||null,req.user.id]
     );
 
-    // Decrement stock automatically
+    // Décrémenter le stock
     await query(
-      `UPDATE stocks SET
-         quantite   = GREATEST(0, quantite - $1),
-         updated_at = NOW()
-       WHERE aliment_id = $2 AND user_id = $3`,
-      [quantite, aliment_id, req.user.id]
+      `UPDATE stocks SET quantite=GREATEST(0,quantite-$1),updated_at=NOW()
+       WHERE aliment_id=$2 AND exploitation_id=$3`,
+      [qte,aliment_id,eid(req)]
     );
 
-    res.status(201).json(result.rows[0]);
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
+    res.status(201).json(r.rows[0]);
+  } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-// DELETE /api/alimentation/distributions/:id
 router.delete('/distributions/:id', async (req, res) => {
   try {
-    const result = await query(
-      'DELETE FROM distributions WHERE id = $1 AND user_id = $2 RETURNING id',
-      [req.params.id, req.user.id]
+    const r = await query(
+      'DELETE FROM distributions WHERE id=$1 AND exploitation_id=$2 RETURNING id',
+      [req.params.id,eid(req)]
     );
-    if (!result.rows.length) return res.status(404).json({ error: 'Record not found' });
+    if (!r.rows.length) return res.status(404).json({ error: 'Distribution introuvable' });
     res.json({ deleted: req.params.id });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
+  } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
 export default router;

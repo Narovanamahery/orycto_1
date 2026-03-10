@@ -1,68 +1,60 @@
-import { db } from './db.js';
+const AUTH_URL = 'http://localhost:3001/api/auth';
 
-async function hashPwd(password) {
-  const buf = await crypto.subtle.digest(
-    'SHA-256',
-    new TextEncoder().encode(password + 'orycto_salt_2025')
-  );
-  return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, '0')).join('');
-}
-
-async function getUsers() {
-  try {
-    const r = await window.storage.get('orycto_users');
-    return r ? JSON.parse(r.value) : [];
-  } catch { return []; }
-}
-
-async function saveUsers(users) {
-  try { await window.storage.set('orycto_users', JSON.stringify(users)); } catch {}
-}
-
+// ── Session (localStorage + cookie backend) ───────────────────────────────────
 export async function getSession() {
+  const token = localStorage.getItem('orycto_token');
+  if (!token) return null;
   try {
-    const r = await window.storage.get('orycto_session');
-    return r ? JSON.parse(r.value) : null;
+    const res = await fetch(`${AUTH_URL}/me`, {
+      credentials: 'include',
+      headers: { 'Authorization': `Bearer ${token}` },
+    });
+    if (!res.ok) { localStorage.removeItem('orycto_token'); return null; }
+    const { user } = await res.json();
+    return user;
   } catch { return null; }
 }
 
-export async function saveSession(user) {
-  try { await window.storage.set('orycto_session', JSON.stringify(user)); } catch {}
+export function clearSession() {
+  localStorage.removeItem('orycto_token');
+  fetch(`${AUTH_URL}/logout`, { method: 'POST', credentials: 'include' }).catch(() => {});
 }
 
-export async function clearSession() {
-  try { await window.storage.delete('orycto_session'); } catch {}
-}
-
+// ── Login ─────────────────────────────────────────────────────────────────────
 export async function login(email, password) {
-  const users = await getUsers();
-  const hash  = await hashPwd(password);
-  const user  = users.find(u => u.email === email.toLowerCase() && u.passwordHash === hash);
-  if (!user)        throw new Error('Incorrect email or password.');
-  if (!user.active) throw new Error('Account is disabled.');
-  await saveSession(user);
-  return user;
+  const res = await fetch(`${AUTH_URL}/login`, {
+    method:      'POST',
+    credentials: 'include',
+    headers:     { 'Content-Type': 'application/json' },
+    body:        JSON.stringify({ email, password }),
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || `Erreur ${res.status}`);
+  if (data.token) localStorage.setItem('orycto_token', data.token);
+  return data.user;
 }
 
-export async function register(email, password, firstName, lastName, role) {
-  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw new Error('Invalid email address.');
-  if (password.length < 8) throw new Error('Password must be at least 8 characters.');
-  const users = await getUsers();
-  if (users.find(u => u.email === email.toLowerCase())) throw new Error('Email already in use.');
-  const hash = await hashPwd(password);
-  const user = {
-    id:           Date.now().toString(36) + Math.random().toString(36).slice(2, 5),
-    email:        email.toLowerCase(),
-    firstName,
-    lastName,
-    role:         role || 'Farm Owner',
-    active:       true,
-    passwordHash: hash,
-    createdAt:    new Date().toISOString(),
-  };
-  await saveUsers([...users, user]);
-  await saveSession(user);
-  return user;
+// ── Register ──────────────────────────────────────────────────────────────────
+export async function register(email, password, firstName, lastName, role, termsAccepted = true) {
+  const res = await fetch(`${AUTH_URL}/register`, {
+    method:      'POST',
+    credentials: 'include',
+    headers:     { 'Content-Type': 'application/json' },
+    body:        JSON.stringify({
+      email, password, firstName, lastName,
+      termsAccepted, privacyAccepted: termsAccepted,
+    }),
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || `Erreur ${res.status}`);
+  // status=pending → pas de token, l'user doit attendre l'approbation
+  if (data.status === 'pending') {
+    const err = new Error(data.message || 'Compte en attente d\'approbation.');
+    err.pending = true;
+    throw err;
+  }
+  if (data.token) localStorage.setItem('orycto_token', data.token);
+  return data.user;
 }
 
 export function showAuthPage(onSuccess) {
@@ -298,8 +290,8 @@ export function showAuthPage(onSuccess) {
             </button>
             <div class="success-overlay" id="success-register">
               <div class="success-icon">✓</div>
-              <div class="success-title">Account created!</div>
-              <div class="success-desc">Welcome to Orycto. Loading your dashboard…</div>
+              <div class="success-title" id="reg-success-title">Account created!</div>
+              <div class="success-desc" id="reg-success-desc">Welcome to Orycto. Loading your dashboard…</div>
             </div>
           </div>
         </div>
@@ -444,14 +436,24 @@ export function showAuthPage(onSuccess) {
     const btn = document.getElementById('btn-register');
     btn.classList.add('loading');
     try {
-      const user = await register(email, pass, first, last, role);
+      const user = await register(email, pass, first, last, role, terms);
       btn.style.display = 'none';
       document.getElementById('form-register').querySelector('.form-head').style.display = 'none';
+      document.getElementById('reg-success-title').textContent = 'Account created!';
+      document.getElementById('reg-success-desc').textContent  = 'Welcome to Orycto. Loading your dashboard…';
       document.getElementById('success-register').classList.add('show');
       setTimeout(() => onSuccess(user), 1600);
     } catch (err) {
       btn.classList.remove('loading');
-      showError('register-error', err.message);
+      if (err.pending) {
+        btn.style.display = 'none';
+        document.getElementById('form-register').querySelector('.form-head').style.display = 'none';
+        document.getElementById('reg-success-title').textContent = 'Request received!';
+        document.getElementById('reg-success-desc').textContent  = 'Your account is pending approval by an administrator. You\'ll be notified once approved.';
+        document.getElementById('success-register').classList.add('show');
+      } else {
+        showError('register-error', err.message);
+      }
     }
   });
 

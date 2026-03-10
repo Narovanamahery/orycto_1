@@ -205,7 +205,7 @@ export async function initFeeding() {
       unite:        a.unite_mesure || 'kg',
       quantite,
       seuil_alerte: seuil,
-      date_expiration: s?.date_expiration || null,
+      date_peremption: s?.date_peremption || null,
       statut_stock: statut,
     };
   });
@@ -231,7 +231,7 @@ function renderStocks() {
             <span class="stock-qty ${s.cls === 'red' ? 'red-text' : s.cls === 'gold' ? 'gold-text' : 'green-text'}">${f.quantite} ${f.unite}</span>
           </div>
           <div class="kstat-bar"><div class="kstat-fill ${s.cls}" style="width:${pct}%"></div></div>
-          <div class="stock-meta">${s.label} · Threshold: ${f.seuil_alerte} ${f.unite}${f.date_expiration ? ' · Exp: ' + f.date_expiration.slice(0,10) : ''}</div>
+          <div class="stock-meta">${s.label} · Threshold: ${f.seuil_alerte} ${f.unite}${f.date_peremption ? ' · Exp: ' + f.date_peremption.slice(0,10) : ''}</div>
         </div>`;
       }).join('')
     : `<p style="color:#A0A8A5;font-size:12px">No feeds defined yet — click "+ Add Feed" to get started</p>`;
@@ -411,7 +411,7 @@ function initModals() {
         const newQty = feed.quantite + qty;
         await api.alimentation.updateStock(feed.stock_id, {
           quantite:        newQty,
-          date_expiration: document.getElementById('rf-expiry').value || feed.date_expiration,
+          date_peremption: document.getElementById('rf-expiry').value || feed.date_peremption,
         });
         feeds[feedIdx].quantite = newQty;
       } else {
@@ -419,7 +419,7 @@ function initModals() {
           aliment_id:      feed.aliment_id,
           quantite:        qty,
           seuil_alerte:    feed.seuil_alerte,
-          date_expiration: document.getElementById('rf-expiry').value || null,
+          date_peremption: document.getElementById('rf-expiry').value || null,
         });
         feeds[feedIdx].stock_id = s.id;
         feeds[feedIdx].quantite = qty;
@@ -459,7 +459,7 @@ function initModals() {
       feeds.push({
         id: aliment.id, aliment_id: aliment.id, stock_id: stock.id,
         nom: name, unite: aliment.unite_mesure, quantite: qty,
-        seuil_alerte: threshold, date_expiration: null, statut_stock: statut,
+        seuil_alerte: threshold, date_peremption: null, statut_stock: statut,
       });
       renderStocks();
       renderStats();

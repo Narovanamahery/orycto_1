@@ -26,7 +26,7 @@ function age(dob) {
 
 function rowHTML(r) {
   const s        = statusMap[r.statut] || statusMap.actif;
-  const sexBadge = r.sexe === 'M'
+  const sexBadge = r.sexe === 'male'
     ? `<span class="sex-badge male">♂ M</span>`
     : `<span class="sex-badge female">♀ F</span>`;
   const cage = r.cage ? `<span class="cage-badge">${r.cage}</span>` : '-';
@@ -71,8 +71,8 @@ export function livestockHTML() {
     <div class="filter-bar">
       <div class="filter-pills">
         <button class="pill active" data-filter="all">All</button>
-        <button class="pill" data-filter="M">♂ Males</button>
-        <button class="pill" data-filter="F">♀ Females</button>
+        <button class="pill" data-filter="male">♂ Males</button>
+        <button class="pill" data-filter="female">♀ Females</button>
         <button class="pill" data-filter="gestante">Pregnant</button>
         <button class="pill" data-filter="malade">Sick</button>
         <button class="pill" data-filter="vendu">Sold</button>
@@ -141,8 +141,8 @@ export function livestockHTML() {
           <div class="form-group">
             <label>Sex <span class="req">*</span></label>
             <select id="f-sex">
-              <option value="M">♂ Male</option>
-              <option value="F">♀ Female</option>
+              <option value="male">♂ Male</option>
+              <option value="female">♀ Female</option>
             </select>
           </div>
           <div class="form-group">
@@ -226,8 +226,8 @@ function renderTable() {
 
 function renderStats() {
   const active  = rabbits.filter(r => !['vendu','mort'].includes(r.statut));
-  const males   = active.filter(r => r.sexe === 'M');
-  const females = active.filter(r => r.sexe === 'F');
+  const males   = active.filter(r => r.sexe === 'male');
+  const females = active.filter(r => r.sexe === 'female');
   const preg    = active.filter(r => r.statut === 'gestante');
   const sick    = active.filter(r => r.statut === 'malade');
   document.getElementById('livestock-stats').innerHTML = `
@@ -274,8 +274,8 @@ function applyFilters() {
     const text   = tr.textContent.toLowerCase();
 
     const matchFilter = activeFilter === 'all' ? true
-      : activeFilter === 'M'       ? sex    === 'M'
-      : activeFilter === 'F'       ? sex    === 'F'
+      : activeFilter === 'male'    ? sex    === 'male'
+      : activeFilter === 'female'  ? sex    === 'female'
       : status === activeFilter;
 
     const matchBreed  = !breedFilter || breed.includes(breedFilter.toLowerCase());
@@ -319,7 +319,7 @@ function initModals() {
       document.getElementById('mv-sub').textContent = r.tag || r.identifiant_unique || '';
       document.getElementById('mv-body').innerHTML = `
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px">
-          <div><label>Sex</label><p style="color:#E0E6E4;margin-top:4px">${r.sexe === 'M' ? '♂ Male' : '♀ Female'}</p></div>
+          <div><label>Sex</label><p style="color:#E0E6E4;margin-top:4px">${r.sexe === 'male' ? '♂ Male' : '♀ Female'}</p></div>
           <div><label>Breed</label><p style="color:#E0E6E4;margin-top:4px">${r.race || '-'}</p></div>
           <div><label>Date of Birth</label><p style="color:#E0E6E4;margin-top:4px">${r.date_naissance || '-'}</p></div>
           <div><label>Age</label><p style="color:#E0E6E4;margin-top:4px">${age(r.date_naissance)}</p></div>
@@ -339,7 +339,7 @@ function initModals() {
       document.getElementById('f-db-id').value  = r.id;
       document.getElementById('f-id').value     = r.tag || r.identifiant_unique || '';
       document.getElementById('f-name').value   = r.nom || '';
-      document.getElementById('f-sex').value    = r.sexe || 'M';
+      document.getElementById('f-sex').value    = r.sexe || 'male';
       document.getElementById('f-breed').value  = r.race || 'Flemish Giant';
       document.getElementById('f-dob').value    = r.date_naissance || '';
       document.getElementById('f-weight').value = r.poids_actuel || '';
@@ -380,7 +380,7 @@ function initModals() {
     ['f-db-id','f-id','f-name','f-weight','f-cage','f-mere','f-pere'].forEach(id => {
       document.getElementById(id).value = '';
     });
-    document.getElementById('f-sex').value    = 'M';
+    document.getElementById('f-sex').value    = 'male';
     document.getElementById('f-breed').value  = 'Flemish Giant';
     document.getElementById('f-status').value = 'actif';
     document.getElementById('f-dob').value    = '';

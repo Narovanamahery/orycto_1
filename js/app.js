@@ -58,6 +58,11 @@ async function handleLogout() {
 async function buildApp(user) {
   document.body.innerHTML = '';
 
+  // Supprimer l'ancien listener hashchange s'il existe
+  if (buildApp._hashHandler) {
+    window.removeEventListener('hashchange', buildApp._hashHandler);
+  }
+
   const App = document.createElement('div');
   App.className = 'app';
   document.body.appendChild(App);
@@ -77,7 +82,8 @@ async function buildApp(user) {
   toastContainer.classList.add('toast-container');
   document.body.appendChild(toastContainer);
 
-  window.addEventListener('hashchange', () => navigate(location.hash));
+  buildApp._hashHandler = () => navigate(location.hash);
+  window.addEventListener('hashchange', buildApp._hashHandler);
   await navigate(location.hash || '#dashboard');
 }
 
