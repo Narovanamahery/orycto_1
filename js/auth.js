@@ -1,4 +1,7 @@
-const AUTH_URL = 'http://localhost:3001/api/auth';
+const BASE_URL  = (typeof import_meta_env !== 'undefined' && import_meta_env.VITE_API_URL)
+  || window.ORYCTO_API_URL
+  || 'http://localhost:3001/api';
+const AUTH_URL = BASE_URL + '/auth';
 
 // ── Session (localStorage + cookie backend) ───────────────────────────────────
 export async function getSession() {

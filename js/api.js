@@ -1,4 +1,6 @@
-const BASE_URL = 'http://localhost:3001/api';
+const BASE_URL = import.meta?.env?.VITE_API_URL
+  || window.ORYCTO_API_URL
+  || 'http://localhost:3001/api';
 
 function getToken() {
   return localStorage.getItem('orycto_token');
@@ -31,10 +33,10 @@ async function request(method, endpoint, body = null) {
   return res.json();
 }
 
-const get    = (ep)        => request('GET',    ep);
-const post   = (ep, body)  => request('POST',   ep, body);
-const put    = (ep, body)  => request('PUT',    ep, body);
-const del    = (ep)        => request('DELETE', ep);
+const get  = (ep)       => request('GET',    ep);
+const post = (ep, body) => request('POST',   ep, body);
+const put  = (ep, body) => request('PUT',    ep, body);
+const del  = (ep)       => request('DELETE', ep);
 
 export const api = {
   dashboard: {
@@ -54,13 +56,13 @@ export const api = {
   },
 
   races: {
-    getAll: () => get('/races'),
+    getAll: ()         => get('/races'),
     create: (data)     => post('/races', data),
     delete: (id)       => del(`/races/${id}`),
   },
 
   cages: {
-    getAll: () => get('/cages'),
+    getAll: ()         => get('/cages'),
     create: (data)     => post('/cages', data),
     update: (id, data) => put(`/cages/${id}`, data),
     delete: (id)       => del(`/cages/${id}`),
